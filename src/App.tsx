@@ -10,6 +10,7 @@ import { ExpenseForm } from './components/ExpenseForm';
 import { ExpenseList } from './components/ExpenseList';
 import { EditCagnotteDialog } from './components/EditCagnotteDialog';
 import { TopContributors } from './components/TopContributors';
+import { DataManager } from './components/DataManager';
 import { formatCurrency } from './utils/formatCurrency';
 import { type View } from './types';
 
@@ -25,6 +26,10 @@ function App() {
     addExpense,
     removeExpense,
     getCagnotteStats,
+    exportData,
+    importData,
+    clearAllData,
+    shareData,
   } = useCagnotte();
 
   const [view, setView] = useState<View>('list');
@@ -127,13 +132,20 @@ function App() {
         </header>
 
         {view === 'list' && (
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-2xl mx-auto space-y-6">
             <CagnotteList
               cagnottes={cagnottes}
               onSelect={handleSelectCagnotte}
               onCreate={() => setIsCreateDialogOpen(true)}
               onDelete={deleteCagnotte}
               getStats={getCagnotteStats}
+            />
+
+            <DataManager
+              onExport={exportData}
+              onImport={importData}
+              onClear={clearAllData}
+              onShare={shareData}
             />
           </div>
         )}
