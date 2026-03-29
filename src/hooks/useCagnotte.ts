@@ -6,12 +6,10 @@ export function useCagnotte() {
   const [cagnottes, setCagnottes] = useState<Cagnotte[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Charger les données depuis IndexedDB au montage
+  // Charger les données depuis Supabase au montage
   useEffect(() => {
     const loadData = async () => {
       try {
-        await dbService.init();
-
         // Si un partage est présent dans l'URL, importer les données partagées
         const params = new URLSearchParams(window.location.search);
         const sharedData = params.get('data');
@@ -74,6 +72,7 @@ export function useCagnotte() {
       currency: 'GNF', // Force GNF
       contributions: [],
       expenses: [],
+      createdAt: new Date().toISOString(),
     };
 
     try {

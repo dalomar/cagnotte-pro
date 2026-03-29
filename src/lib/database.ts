@@ -1,153 +1,136 @@
-import { openDB, DBSchema, IDBPDatabase } from 'idb';
+import { supabase } from './supabase';
 import type { Cagnotte, Contribution, Expense } from '../types';
 
-interface CagnotteDB extends DBSchema {
-  cagnottes: {
-    key: string;
-    value: Cagnotte;
-    indexes: { 'by-name': string };
-  };
-  contributions: {
-    key: string;
-    value: Contribution & { cagnotteId: string };
-    indexes: { 'by-cagnotte': string; 'by-date': string };
-  };
-  expenses: {
-    key: string;
-    value: Expense & { cagnotteId: string };
-    indexes: { 'by-cagnotte': string; 'by-date': string };
-  };
-  metadata: {
-    key: string;
-    value: any;
-  };
-}
-
 class DatabaseService {
-  private db: IDBPDatabase<CagnotteDB> | null = null;
-
-  async init(): Promise<void> {
-    if (this.db) return;
-
-    this.db = await openDB<CagnotteDB>('cagnotte-pro-db', 1, {
-      upgrade(db) {
-        // Table des cagnottes
-        if (!db.objectStoreNames.contains('cagnottes')) {
-          const cagnotteStore = db.createObjectStore('cagnottes', { keyPath: 'id' });
-          cagnotteStore.createIndex('by-name', 'name');
-        }
-
-        // Table des contributions
-        if (!db.objectStoreNames.contains('contributions')) {
-          const contributionStore = db.createObjectStore('contributions', { keyPath: 'id' });
-          contributionStore.createIndex('by-cagnotte', 'cagnotteId');
-          contributionStore.createIndex('by-date', 'date');
-        }
-
-        // Table des dépenses
-        if (!db.objectStoreNames.contains('expenses')) {
-          const expenseStore = db.createObjectStore('expenses', { keyPath: 'id' });
-          expenseStore.createIndex('by-cagnotte', 'cagnotteId');
-          expenseStore.createIndex('by-date', 'date');
-        }
-
-        // Table des métadonnées
-        if (!db.objectStoreNames.contains('metadata')) {
-          db.createObjectStore('metadata');
-        }
-      },
-    });
-  }
-
   // === CAGNOTTES ===
 
   async getAllCagnottes(): Promise<Cagnotte[]> {
-    await this.init();
-    return this.db!.getAll('cagnottes');
+    const { data, error } = await supabase
+      .from('cagnottes')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    return (data ?? []).map(row => ({
+      id: row.id,
+      name: row.name,
+      goal: row.goal,
+      currency: row.currency,
+      createdAt: row.created_at,
+      contributions: [],
+      expenses: [],
+    }));
   }
 
   async saveCagnotte(cagnotte: Cagnotte): Promise<void> {
-    await this.init();
-    await this.db!.put('cagnottes', cagnotte);
+    const { error } = await supabase
+      .from('cagnottes')
+      .upsert({
+        id: cagnotte.id,
+        name: cagnotte.name,
+        goal: cagnotte.goal,
+        currency: cagnotte.currency,
+        created_at: cagnotte.createdAt,
+      });
+
+    if (error) throw error;
   }
 
   async deleteCagnotte(id: string): Promise<void> {
-    await this.init();
-    // Supprimer aussi toutes les contributions et dépenses liées
-    const tx = this.db!.transaction(['cagnottes', 'contributions', 'expenses'], 'readwrite');
-
-    await Promise.all([
-      tx.objectStore('cagnottes').delete(id),
-      tx.objectStore('contributions').index('by-cagnotte').openCursor(IDBKeyRange.only(id)).then(cursor => {
-        while (cursor) {
-          cursor.delete();
-          cursor.continue();
-        }
-      }),
-      tx.objectStore('expenses').index('by-cagnotte').openCursor(IDBKeyRange.only(id)).then(cursor => {
-        while (cursor) {
-          cursor.delete();
-          cursor.continue();
-        }
-      }),
-    ]);
-
-    await tx.done;
+    // contributions and expenses are deleted by CASCADE in the DB schema
+    const { error } = await supabase.from('cagnottes').delete().eq('id', id);
+    if (error) throw error;
   }
 
   // === CONTRIBUTIONS ===
 
   async getContributions(cagnotteId: string): Promise<Contribution[]> {
-    await this.init();
-    const contributions = await this.db!.getAllFromIndex('contributions', 'by-cagnotte', cagnotteId);
-    return contributions.map(({ cagnotteId: _, ...contrib }) => contrib);
+    const { data, error } = await supabase
+      .from('contributions')
+      .select('*')
+      .eq('cagnotte_id', cagnotteId)
+      .order('date', { ascending: true });
+
+    if (error) throw error;
+
+    return (data ?? []).map(row => ({
+      id: row.id,
+      name: row.name,
+      amount: row.amount,
+      date: row.date,
+    }));
   }
 
   async addContribution(cagnotteId: string, contribution: Contribution): Promise<void> {
-    await this.init();
-    await this.db!.add('contributions', { ...contribution, cagnotteId });
+    const { error } = await supabase.from('contributions').insert({
+      id: contribution.id,
+      cagnotte_id: cagnotteId,
+      name: contribution.name,
+      amount: contribution.amount,
+      date: contribution.date,
+    });
+
+    if (error) throw error;
   }
 
   async deleteContribution(contributionId: string): Promise<void> {
-    await this.init();
-    await this.db!.delete('contributions', contributionId);
+    const { error } = await supabase.from('contributions').delete().eq('id', contributionId);
+    if (error) throw error;
   }
 
   // === EXPENSES ===
 
   async getExpenses(cagnotteId: string): Promise<Expense[]> {
-    await this.init();
-    const expenses = await this.db!.getAllFromIndex('expenses', 'by-cagnotte', cagnotteId);
-    return expenses.map(({ cagnotteId: _, ...expense }) => expense);
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('*')
+      .eq('cagnotte_id', cagnotteId)
+      .order('date', { ascending: true });
+
+    if (error) throw error;
+
+    return (data ?? []).map(row => ({
+      id: row.id,
+      name: row.name,
+      amount: row.amount,
+      date: row.date,
+    }));
   }
 
   async addExpense(cagnotteId: string, expense: Expense): Promise<void> {
-    await this.init();
-    await this.db!.add('expenses', { ...expense, cagnotteId });
+    const { error } = await supabase.from('expenses').insert({
+      id: expense.id,
+      cagnotte_id: cagnotteId,
+      name: expense.name,
+      amount: expense.amount,
+      date: expense.date,
+    });
+
+    if (error) throw error;
   }
 
   async deleteExpense(expenseId: string): Promise<void> {
-    await this.init();
-    await this.db!.delete('expenses', expenseId);
+    const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
+    if (error) throw error;
   }
 
   // === EXPORT/IMPORT ===
 
   async exportData(): Promise<string> {
-    await this.init();
-    const [cagnottes, contributions, expenses] = await Promise.all([
+    const [cagnottes, { data: contributions }, { data: expenses }] = await Promise.all([
       this.getAllCagnottes(),
-      this.db!.getAll('contributions'),
-      this.db!.getAll('expenses'),
+      supabase.from('contributions').select('*'),
+      supabase.from('expenses').select('*'),
     ]);
 
     return JSON.stringify({
       cagnottes,
-      contributions,
-      expenses,
+      contributions: contributions ?? [],
+      expenses: expenses ?? [],
       exportDate: new Date().toISOString(),
       version: '2.0',
-      db: 'IndexedDB'
+      db: 'Supabase',
     }, null, 2);
   }
 
@@ -158,34 +141,45 @@ class DatabaseService {
       throw new Error('Format de données invalide');
     }
 
-    await this.init();
-    const tx = this.db!.transaction(['cagnottes', 'contributions', 'expenses'], 'readwrite');
+    // Clear existing data
+    await this.clearAllData();
 
-    // Vider les tables existantes
-    await Promise.all([
-      tx.objectStore('cagnottes').clear(),
-      tx.objectStore('contributions').clear(),
-      tx.objectStore('expenses').clear(),
-    ]);
-
-    // Importer les nouvelles données
+    // Import cagnottes
     for (const cagnotte of data.cagnottes) {
-      await tx.objectStore('cagnottes').add(cagnotte);
+      await this.saveCagnotte(cagnotte);
     }
 
-    if (data.contributions) {
+    // Import contributions
+    if (data.contributions && Array.isArray(data.contributions)) {
       for (const contribution of data.contributions) {
-        await tx.objectStore('contributions').add(contribution);
+        // Support both old IndexedDB export (cagnotteId) and Supabase export (cagnotte_id)
+        const cagnotte_id = contribution.cagnotte_id ?? contribution.cagnotteId;
+        if (cagnotte_id) {
+          await this.addContribution(cagnotte_id, {
+            id: contribution.id,
+            name: contribution.name,
+            amount: contribution.amount,
+            date: contribution.date,
+          });
+        }
       }
     }
 
-    if (data.expenses) {
+    // Import expenses
+    if (data.expenses && Array.isArray(data.expenses)) {
       for (const expense of data.expenses) {
-        await tx.objectStore('expenses').add(expense);
+        // Support both old IndexedDB export (cagnotteId) and Supabase export (cagnotte_id)
+        const cagnotte_id = expense.cagnotte_id ?? expense.cagnotteId;
+        if (cagnotte_id) {
+          await this.addExpense(cagnotte_id, {
+            id: expense.id,
+            name: expense.name,
+            amount: expense.amount,
+            date: expense.date,
+          });
+        }
       }
     }
-
-    await tx.done;
   }
 
   // === STATISTIQUES ===
@@ -196,47 +190,36 @@ class DatabaseService {
     totalExpenses: number;
     dbSize: string;
   }> {
-    await this.init();
-
-    const [cagnottes, contributions, expenses] = await Promise.all([
-      this.db!.count('cagnottes'),
-      this.db!.count('contributions'),
-      this.db!.count('expenses'),
+    const [
+      { count: totalCagnottes },
+      { count: totalContributions },
+      { count: totalExpenses },
+    ] = await Promise.all([
+      supabase.from('cagnottes').select('*', { count: 'exact', head: true }),
+      supabase.from('contributions').select('*', { count: 'exact', head: true }),
+      supabase.from('expenses').select('*', { count: 'exact', head: true }),
     ]);
 
-    // Estimation de la taille (approximative)
-    const totalRecords = cagnottes + contributions + expenses;
-    const estimatedSize = (totalRecords * 500) / 1024; // ~500 bytes par enregistrement
+    const total = (totalCagnottes ?? 0) + (totalContributions ?? 0) + (totalExpenses ?? 0);
+    const estimatedSize = (total * 500) / 1024;
 
     return {
-      totalCagnottes: cagnottes,
-      totalContributions: contributions,
-      totalExpenses: expenses,
-      dbSize: estimatedSize < 1024 ? `${Math.round(estimatedSize)} KB` : `${(estimatedSize / 1024).toFixed(1)} MB`
+      totalCagnottes: totalCagnottes ?? 0,
+      totalContributions: totalContributions ?? 0,
+      totalExpenses: totalExpenses ?? 0,
+      dbSize: estimatedSize < 1024
+        ? `${Math.round(estimatedSize)} KB`
+        : `${(estimatedSize / 1024).toFixed(1)} MB`,
     };
   }
 
   // === MAINTENANCE ===
 
   async clearAllData(): Promise<void> {
-    await this.init();
-    const tx = this.db!.transaction(['cagnottes', 'contributions', 'expenses', 'metadata'], 'readwrite');
-
-    await Promise.all([
-      tx.objectStore('cagnottes').clear(),
-      tx.objectStore('contributions').clear(),
-      tx.objectStore('expenses').clear(),
-      tx.objectStore('metadata').clear(),
-    ]);
-
-    await tx.done;
-  }
-
-  async close(): Promise<void> {
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-    }
+    // Delete contributions and expenses first (FK constraints), then cagnottes
+    await supabase.from('contributions').delete().not('id', 'is', null);
+    await supabase.from('expenses').delete().not('id', 'is', null);
+    await supabase.from('cagnottes').delete().not('id', 'is', null);
   }
 }
 
